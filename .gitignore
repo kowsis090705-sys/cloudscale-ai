@@ -1,0 +1,32 @@
+# Java / Spring Boot
+target/
+*.class
+*.jar
+*.war
+
+# IDE files
+.vscode/
+.idea/
+*.iml
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+application-local.properties
+application-local.yml
+application-secret.properties
+application-secret.yml
+*.pem
+*.key
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# System files
+.DS_Store
+Thumbs.db
+src/main/resources/application.properties
