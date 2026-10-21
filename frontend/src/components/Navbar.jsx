@@ -1,12 +1,2 @@
-import { Link } from "react-router-dom";
-
-export default function Navbar() {
-  return (
-    <nav style={{ display: "flex", gap: "20px", padding: "12px" }}>
-      <Link to="/">Events</Link>
-      <Link to="/my-bookings">My Bookings</Link>
-      <Link to="/admin">Admin</Link>
-      <Link to="/dashboard">Dashboard</Link>
-    </nav>
-  );
-}
+import {NavLink} from "react-router-dom";
+export default function Navbar(){return <nav className="top-nav"><NavLink className="brand" to="/">CloudScale <span>AI</span></NavLink><NavLink to="/" end>Events</NavLink><NavLink to="/my-bookings">My Bookings</NavLink><NavLink to="/admin">Admin</NavLink><NavLink to="/dashboard">Dashboard</NavLink></nav>}
