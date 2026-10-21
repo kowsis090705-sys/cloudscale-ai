@@ -2,95 +2,11 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { fetchEvent, fetchSeats, createBooking } from "../api/client";
 import SeatGrid from "../components/SeatGrid";
-
 export default function SeatSelection() {
-  const { id } = useParams();
-  const navigate = useNavigate();
-  const [event, setEvent] = useState(null);
-  const [seats, setSeats] = useState([]);
-  const [selected, setSelected] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const ev = await fetchEvent(id);
-        if (!ev) {
-          setError("Event not found.");
-          return;
-        }
-        setEvent(ev);
-        setSeats(await fetchSeats(id));
-      } catch {
-        setError("Could not load seats. Is the backend running?");
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
-  }, [id]);
-
-  const toggleSeat = (seatId) => {
-    setSelected((prev) =>
-      prev.includes(seatId) ? prev.filter((s) => s !== seatId) : [...prev, seatId]
-    );
-  };
-
-  const confirmBooking = async () => {
-    setSaving(true);
-    setError("");
-    try {
-      const booking = await createBooking({
-        eventId: id,
-        eventName: event.name,
-        seats: selected,
-        total: selected.length * event.price,
-      });
-      navigate(`/confirmation/${booking.id}`);
-    } catch (err) {
-      setError(
-        err.response?.status === 409
-          ? "Some seats were just taken by someone else. Please choose again."
-          : "Booking failed. Please try again."
-      );
-      setSelected([]);
-      try {
-        setSeats(await fetchSeats(id));
-      } catch {
-        // ignore, the error message above is already shown
-      }
-      setSaving(false);
-    }
-  };
-
-  if (loading) return <p style={{ padding: "16px" }}>Loading...</p>;
-  if (!event) return <p style={{ padding: "16px", color: "#c62828" }}>{error || "Event not found."}</p>;
-
-  return (
-    <div style={{ padding: "16px" }}>
-      <h2>{event.name}</h2>
-      <p>{event.venue} | {event.date} at {event.time}</p>
-
-      <p style={{ textAlign: "center", background: "#ddd", padding: "6px", maxWidth: "540px" }}>
-        SCREEN / STAGE
-      </p>
-
-      <SeatGrid seats={seats} selected={selected} onToggle={toggleSeat} />
-
-      <p>
-        <span style={{ background: "#e0e0e0", padding: "2px 10px" }}> </span> Available{" "}
-        <span style={{ background: "#4caf50", padding: "2px 10px" }}> </span> Selected{" "}
-        <span style={{ background: "#888", padding: "2px 10px" }}> </span> Booked
-      </p>
-
-      <h3>Selected seats: {selected.length ? selected.join(", ") : "None"}</h3>
-      <h3>Total: ₹{selected.length * event.price}</h3>
-      {error && <p style={{ color: "#c62828" }}>{error}</p>}
-      <button disabled={selected.length === 0 || saving} onClick={confirmBooking}>
-        {saving ? "Booking..." : "Confirm Booking"}
-      </button>
-    </div>
-  );
+ const { id }=useParams(); const navigate=useNavigate();
+ const [event,setEvent]=useState(null),[seats,setSeats]=useState([]),[selected,setSelected]=useState([]),[loading,setLoading]=useState(true),[saving,setSaving]=useState(false),[error,setError]=useState("");
+ useEffect(()=>{let mounted=true;(async()=>{try{const e=await fetchEvent(id);if(!e)throw new Error("Event not found");const s=await fetchSeats(id);if(mounted){setEvent(e);setSeats(s)}}catch(e){if(mounted)setError(e.message || "Failed to load seats")}finally{if(mounted)setLoading(false)}})();return()=>{mounted=false}},[id]);
+ async function confirm(){setSaving(true);setError("");try{const b=await createBooking({seats:selected});navigate("/confirmation/"+b.id)}catch(e){setError(e.response?.status===409?"Seat already booked; choose another.":e.message||"Booking failed");setSelected([]);try{setSeats(await fetchSeats(id))}catch{}}finally{setSaving(false)}}
+ if(loading)return <p>Loading...</p>;if(!event)return <p>{error||"Event not found"}</p>;
+ return <main style={{padding:16}}><h2>{event.name}</h2><p>{event.venue} | {event.date} {event.time}</p><p>Select one seat per booking.</p><p style={{background:"#ddd",padding:8,textAlign:"center",maxWidth:540}}>STAGE</p><SeatGrid seats={seats} selected={selected} onToggle={seatId=>setSelected(p=>p.includes(seatId)?[]:[seatId])}/><p>Selected: {selected.length?seats.find(s=>s.id===selected[0])?.seatNo:"None"}</p><p>Ticket price: ₹{event.price}</p>{error&&<p style={{color:"crimson"}}>{error}</p>}<button disabled={!selected.length||saving} onClick={confirm}>{saving?"Booking...":"Confirm Booking"}</button></main>;
 }

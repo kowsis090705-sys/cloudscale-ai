@@ -1,67 +1,33 @@
 import axios from "axios";
-import * as mockEvents from "../mock/events";
-import { getSeats as mockSeats } from "../mock/seats";
-import * as mockBookings from "../mock/bookings";
-
-const USE_MOCK = import.meta.env.VITE_USE_MOCK === "true";
-const USER_ID = 1;
-
-const http = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
-  timeout: 10000,
-});
-
-// ---------- Events ----------
-export async function fetchEvents() {
-  if (USE_MOCK) return mockEvents.getEvents();
-  return (await http.get("/events")).data;
-}
-
-export async function fetchEvent(id) {
-  const all = await fetchEvents();
-  return all.find((e) => String(e.id) === String(id));
-}
-
+const USER_ID = Number(import.meta.env.VITE_DEMO_USER_ID || 1);
+const http = axios.create({ baseURL: "/api", timeout: 10000 });
+const toEvent = e => {
+  const at = e.showTime || "";
+  return { ...e, name: e.title, date: at.slice(0,10), time: at.slice(11,16), price: Number(e.price || 0), seatsLeft: e.seatsLeft ?? e.totalSeats };
+};
+const toSeat = s => {
+  const match = String(s.seatNo || "").match(/^(.*?)(\d+)$/);
+  const num = match ? Number(match[2]) : s.id;
+  return { ...s, number: s.seatNo, row: String.fromCharCode(65 + Math.floor((num-1)/10)), booked: s.status !== "AVAILABLE" };
+};
+const toBooking = b => ({ ...b, seats: [b.seatNo || String(b.seatId)], eventName: b.eventName || ("Event #" + b.eventId), total: Number(b.total || 0), bookedAt: b.createdAt || "" });
+export async function fetchEvents() { return (await http.get("/events")).data.map(toEvent); }
+export async function fetchEvent(id) { return (await fetchEvents()).find(e => String(e.id) === String(id)); }
 export async function createEvent(data) {
-  if (USE_MOCK) return mockEvents.addEvent(data);
-  return (await http.post("/events", data)).data;
+  const showTime = data.date + "T" + (/^\d{2}:\d{2}$/.test(data.time) ? data.time : parseTime(data.time)) + ":00";
+  return toEvent((await http.post("/admin/events", {title:data.name,type:data.type,venue:data.venue,showTime,totalSeats:Number(data.totalSeats),price:Number(data.price)})).data);
 }
-
-export async function removeEvent(id) {
-  if (USE_MOCK) return mockEvents.deleteEvent(id);
-  await http.delete(`/events/${id}`);
+function parseTime(value) {
+  const m = String(value).match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!m) throw new Error("Use time HH:mm or h:mm AM/PM");
+  return String((Number(m[1])%12)+(m[3].toUpperCase()==="PM"?12:0)).padStart(2,"0")+":"+m[2];
 }
-
-// ---------- Seats ----------
-export async function fetchSeats(eventId) {
-  if (USE_MOCK) {
-    const event = await fetchEvent(eventId);
-    const taken = mockBookings.getBookedSeatIds(eventId);
-    return mockSeats(eventId, event.totalSeats).map((s) => ({
-      ...s,
-      booked: s.booked || taken.includes(s.id),
-    }));
-  }
-  return (await http.get(`/events/${eventId}/seats`)).data;
+export async function removeEvent(id) { await http.delete("/admin/events/" + id); }
+export async function fetchSeats(id) { return (await http.get("/events/" + id + "/seats")).data.map(toSeat); }
+export async function createBooking({ seats }) {
+  if (seats.length !== 1) throw new Error("Please select exactly one seat per booking.");
+  return toBooking((await http.post("/bookings",{userId:USER_ID,seatId:Number(seats[0])})).data);
 }
-
-// ---------- Bookings ----------
-export async function createBooking({ eventId, eventName, seats, total }) {
-  if (USE_MOCK) return mockBookings.addBooking({ eventId, eventName, seats, total });
-  return (await http.post("/bookings", { eventId: Number(eventId), seats, userId: USER_ID })).data;
-}
-
-export async function fetchBookings() {
-  if (USE_MOCK) return mockBookings.getBookings();
-  return (await http.get("/bookings", { params: { userId: USER_ID } })).data;
-}
-
-export async function fetchBooking(id) {
-  if (USE_MOCK) return mockBookings.getBookings().find((b) => b.id === id);
-  return (await http.get(`/bookings/${id}`)).data;
-}
-
-export async function removeBooking(id) {
-  if (USE_MOCK) return mockBookings.cancelBooking(id);
-  await http.delete(`/bookings/${id}`);
-}
+export async function fetchBookings() { return (await http.get("/bookings/user/" + USER_ID)).data.map(toBooking); }
+export async function fetchBooking(id) { return toBooking((await http.get("/bookings/" + id)).data); }
+export async function removeBooking(id) { await http.delete("/bookings/" + id); }
