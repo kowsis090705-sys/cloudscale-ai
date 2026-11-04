@@ -10,6 +10,9 @@ import com.cloudscale.ticket.repository.EventRepository;
 import com.cloudscale.ticket.repository.SeatRepository;
 
 import com.cloudscale.ticket.service.BookingService;
+import com.cloudscale.ticket.service.PaymentService;
+
+import com.razorpay.RazorpayException;
 
 import lombok.RequiredArgsConstructor;
 
@@ -28,23 +31,25 @@ import java.util.List;
 public class BookingController {
 
     private final BookingService service;
+    private final PaymentService paymentService;
+
     private final BookingRepository bookingRepo;
     private final EventRepository eventRepo;
     private final SeatRepository seatRepo;
 
-    // Existing single-seat request
+    // SINGLE-SEAT BOOKING REQUEST
     public record BookingRequest(
             Long userId,
             Long seatId
     ) {}
 
-    // New multiple-seat request
+    // MULTIPLE-SEAT BOOKING REQUEST
     public record MultipleBookingRequest(
             Long userId,
             List<Long> seatIds
     ) {}
 
-    // Response with booking and event information
+    // RESPONSE SENT TO REACT FRONTEND
     public record BookingView(
             Long id,
             Long userId,
@@ -54,10 +59,15 @@ public class BookingController {
             LocalDateTime createdAt,
             String eventName,
             String seatNo,
-            BigDecimal total
+            BigDecimal total,
+
+            // Razorpay refund information
+            String refundStatus,
+            String razorpayRefundId,
+            BigDecimal refundAmount
     ) {}
 
-    // Convert booking entity into frontend response
+    // CONVERT BOOKING ENTITY TO FRONTEND RESPONSE
     private BookingView view(Booking booking) {
 
         Event event = eventRepo
@@ -92,15 +102,20 @@ public class BookingController {
                 booking.getCreatedAt(),
                 eventName,
                 seatNumber,
-                price
+                price,
+
+                // Refund fields
+                booking.getRefundStatus(),
+                booking.getRazorpayRefundId(),
+                booking.getRefundAmount()
         );
     }
 
-    // Existing single-seat booking
+    // 1. SINGLE-SEAT BOOKING
     @PostMapping
     public BookingView book(
-            @RequestBody BookingRequest request) {
-
+            @RequestBody BookingRequest request
+    ) {
         Booking booking = service.book(
                 request.userId(),
                 request.seatId()
@@ -109,11 +124,11 @@ public class BookingController {
         return view(booking);
     }
 
-    // NEW: Book multiple seats together
+    // 2. MULTIPLE-SEAT BOOKING
     @PostMapping("/multiple")
     public List<BookingView> bookMultiple(
-            @RequestBody MultipleBookingRequest request) {
-
+            @RequestBody MultipleBookingRequest request
+    ) {
         List<Booking> bookings = service.bookMultiple(
                 request.userId(),
                 request.seatIds()
@@ -124,22 +139,22 @@ public class BookingController {
                 .toList();
     }
 
-    // View all bookings of a user
+    // 3. VIEW ALL BOOKINGS OF A USER
     @GetMapping("/user/{userId}")
     public List<BookingView> byUser(
-            @PathVariable Long userId) {
-
+            @PathVariable Long userId
+    ) {
         return bookingRepo.findByUserId(userId)
                 .stream()
                 .map(this::view)
                 .toList();
     }
 
-    // Get individual booking confirmation
+    // 4. GET INDIVIDUAL BOOKING
     @GetMapping("/{id}")
     public BookingView get(
-            @PathVariable Long id) {
-
+            @PathVariable Long id
+    ) {
         Booking booking = bookingRepo.findById(id)
                 .orElseThrow(() ->
                         new ResponseStatusException(
@@ -151,13 +166,45 @@ public class BookingController {
         return view(booking);
     }
 
-    // Cancel an existing booking
+    // 5. CANCEL TICKET AND REQUEST RAZORPAY REFUND
     @DeleteMapping("/{id}")
     public BookingView cancel(
-            @PathVariable Long id) {
+            @PathVariable Long id
+    ) {
+        Booking booking = bookingRepo.findById(id)
+                .orElseThrow(() ->
+                        new ResponseStatusException(
+                                HttpStatus.NOT_FOUND,
+                                "Booking not found"
+                        )
+                );
 
-        Booking booking = service.cancel(id);
+        // Old demo bookings without Razorpay payment
+        if (booking.getPayment() == null) {
+            Booking cancelled = service.cancel(id);
+            return view(cancelled);
+        }
 
-        return view(booking);
+        // Razorpay-paid bookings
+        try {
+            paymentService.refundBooking(id);
+
+            Booking updated = bookingRepo.findById(id)
+                    .orElseThrow(() ->
+                            new ResponseStatusException(
+                                    HttpStatus.NOT_FOUND,
+                                    "Booking not found"
+                            )
+                    );
+
+            return view(updated);
+
+        } catch (RazorpayException e) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_GATEWAY,
+                    "Razorpay refund failed or needs review",
+                    e
+            );
+        }
     }
 }

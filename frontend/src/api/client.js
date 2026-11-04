@@ -170,7 +170,8 @@ export async function fetchBooking(id) {
   return toBooking(response.data);
 }
 
-// Cancel booking
+// Cancel booking and return updated booking details
 export async function removeBooking(id) {
-  await http.delete(`/bookings/${id}`);
+  const response = await http.delete(`/bookings/${id}`);
+  return toBooking(response.data);
 }

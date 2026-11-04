@@ -1,4 +1,3 @@
-
 package com.cloudscale.ticket.model;
 
 import jakarta.persistence.*;
@@ -16,21 +15,27 @@ public class Payment {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // Customer and event details
+    // Customer and event information
     @Column(nullable = false)
     private Long userId;
 
     @Column(nullable = false)
     private Long eventId;
 
-    // Razorpay transaction identifiers
+    // Razorpay order ID
     @Column(nullable = false, unique = true)
     private String razorpayOrderId;
 
+    // Selected seats for this payment order
+    // Example: "6,9"
+    @Column(name = "selected_seat_ids", columnDefinition = "TEXT")
+    private String selectedSeatIds;
+
+    // Razorpay payment ID after successful payment
     @Column(unique = true)
     private String razorpayPaymentId;
 
-    // Payment information
+    // Payment amount in INR
     @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal amount;
 
@@ -39,12 +44,12 @@ public class Payment {
 
     private String paymentMethod;
 
-    // CREATED, CAPTURED, FAILED, REFUNDED,
-    // PARTIALLY_REFUNDED
+    // CREATED, CAPTURED, FAILED,
+    // PARTIALLY_REFUNDED, REFUNDED
     @Column(nullable = false)
     private String status = "CREATED";
 
-    // Total amount refunded so far
+    // Total refunded amount in INR
     @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal refundedAmount = BigDecimal.ZERO;
 

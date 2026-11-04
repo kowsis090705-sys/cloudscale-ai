@@ -1,7 +1,48 @@
-
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { createMultipleBooking } from "../api/client";
+
+const API_BASE = "/api";
+
+// Demo user ID - replace with authenticated user ID later
+const DEMO_USER_ID = 1;
+
+function loadRazorpayScript() {
+  return new Promise((resolve) => {
+    if (window.Razorpay) {
+      resolve(true);
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+
+    document.body.appendChild(script);
+  });
+}
+
+async function postJson(path, body) {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(
+      data.message ||
+      data.detail ||
+      `Request failed: HTTP ${response.status}`
+    );
+  }
+
+  return data;
+}
 
 export default function Payment() {
   const navigate = useNavigate();
@@ -10,10 +51,9 @@ export default function Payment() {
   const event = location.state?.event;
   const selectedSeats = location.state?.selectedSeats || [];
 
-  const [method, setMethod] = useState("upi");
   const [processing, setProcessing] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState("");
-  const [simulateFailure, setSimulateFailure] = useState(false);
 
   const price = Number(event?.price || 0);
   const total = selectedSeats.length * price;
@@ -28,37 +68,106 @@ export default function Payment() {
   };
 
   async function handlePayment() {
-    if (processing || !event || selectedSeats.length === 0) return;
+    if (processing || !event || selectedSeats.length === 0) {
+      return;
+    }
 
     setProcessing(true);
     setError("");
 
     try {
-      // Simulated payment only; no real transaction.
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      // Load Razorpay Checkout
+      const loaded = await loadRazorpayScript();
 
-      if (simulateFailure) {
-        setError("Demo payment failed. Please try again.");
-        return;
+      if (!loaded) {
+        throw new Error("Unable to load Razorpay Checkout.");
       }
 
-      // Book seats only after demo payment succeeds.
-      const bookings = await createMultipleBooking({
-        seats: selectedSeats.map((seat) => seat.id),
+      // Create order through Spring Boot backend
+      const order = await postJson("/payments/create-order", {
+        userId: DEMO_USER_ID,
+        seatIds: selectedSeats.map((seat) => seat.id),
       });
 
-      if (!Array.isArray(bookings) || bookings.length === 0) {
-        throw new Error("Booking confirmation not received.");
+      if (!order.orderId || !order.keyId) {
+        throw new Error("Invalid Razorpay order response.");
       }
 
-      navigate("/my-bookings", { replace: true });
+      if (!order.keyId.startsWith("rzp_test_")) {
+        throw new Error("Only Razorpay Test Mode is allowed.");
+      }
+
+      // Configure Razorpay checkout
+      const options = {
+        key: order.keyId,
+        amount: order.amount,
+        currency: order.currency,
+        name: "CloudScale AI",
+        description: `${event.title || event.name || "Event"} Tickets`,
+        order_id: order.orderId,
+
+        theme: {
+          color: "#5278e9",
+        },
+
+        // Razorpay payment success callback
+        handler: async function (response) {
+          setVerifying(true);
+          setError("");
+
+          try {
+            // Send payment proof to backend
+            const result = await postJson("/payments/verify", {
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            });
+
+            if (
+              result.status !== "CONFIRMED" ||
+              !Array.isArray(result.bookingIds) ||
+              result.bookingIds.length !== selectedSeats.length
+            ) {
+              throw new Error("Ticket confirmation is incomplete.");
+            }
+
+            // Navigate only after backend confirms tickets
+            navigate("/my-bookings", {
+              replace: true,
+            });
+          } catch (err) {
+            setError(
+              "Payment may have succeeded, but ticket confirmation " +
+              "could not be completed. Do not pay again. " +
+              `Payment ID: ${response.razorpay_payment_id}. ` +
+              (err.message || "")
+            );
+          } finally {
+            setVerifying(false);
+            setProcessing(false);
+          }
+        },
+
+        modal: {
+          ondismiss: function () {
+            setProcessing(false);
+          },
+        },
+      };
+
+      const razorpay = new window.Razorpay(options);
+
+      razorpay.on("payment.failed", function (response) {
+        setError(
+          response.error?.description ||
+          "Test payment failed. Please try again."
+        );
+        setProcessing(false);
+      });
+
+      razorpay.open();
     } catch (err) {
-      setError(
-        err.response?.status === 409
-          ? "One or more seats are no longer available. Go back and select other seats."
-          : err.message || "Unable to confirm booking."
-      );
-    } finally {
+      setError(err.message || "Unable to start payment.");
       setProcessing(false);
     }
   }
@@ -68,6 +177,7 @@ export default function Payment() {
       <main style={{ padding: 24, color: "#f8faff" }}>
         <h2>Payment Session Not Found</h2>
         <p>Please select your tickets again.</p>
+
         <button onClick={() => navigate("/events")}>
           Back to Events
         </button>
@@ -84,71 +194,60 @@ export default function Payment() {
         color: "#f8faff",
       }}
     >
-      <h2>Secure Demo Checkout</h2>
+      <h2>Secure Razorpay Test Checkout</h2>
+
       <p style={{ color: "#b9c5e2" }}>
-        College project demonstration. No actual payment is collected.
+        College project demonstration using Razorpay Test Mode.
+        No real money will be deducted.
       </p>
 
       <section style={cardStyle}>
         <h3>Order Summary</h3>
-        <p><strong>Event:</strong> {event.name}</p>
+
+        <p>
+          <strong>Event:</strong>{" "}
+          {event.title || event.name}
+        </p>
+
         <p>
           <strong>Seats:</strong>{" "}
-          {selectedSeats.map((seat) => seat.seatNo || seat.number).join(", ")}
+          {selectedSeats
+            .map((seat) => seat.seatNo || seat.number || seat.id)
+            .join(", ")}
         </p>
-        <p><strong>Tickets:</strong> {selectedSeats.length}</p>
+
+        <p>
+          <strong>Tickets:</strong> {selectedSeats.length}
+        </p>
+
         <p>
           <strong>Price per Ticket:</strong> ₹
           {price.toLocaleString("en-IN")}
         </p>
-        <h2>Total: ₹{total.toLocaleString("en-IN")}</h2>
+
+        <h2>
+          Total: ₹{total.toLocaleString("en-IN")}
+        </h2>
       </section>
 
       <section style={cardStyle}>
-        <h3>Select Payment Method</h3>
+        <h3>Payment Method</h3>
 
-        {[
-          ["upi", "UPI (Demo)"],
-          ["card", "Debit / Credit Card (Demo)"],
-          ["netbanking", "Net Banking (Demo)"],
-        ].map(([value, label]) => (
-          <label
-            key={value}
-            style={{
-              display: "block",
-              marginBottom: 16,
-              cursor: "pointer",
-            }}
-          >
-            <input
-              type="radio"
-              name="paymentMethod"
-              value={value}
-              checked={method === value}
-              onChange={() => setMethod(value)}
-            />{" "}
-            {label}
-          </label>
-        ))}
-
-        <label
-          style={{
-            display: "block",
-            margin: "20px 0",
-            color: "#ffb74d",
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={simulateFailure}
-            onChange={(e) => setSimulateFailure(e.target.checked)}
-          />{" "}
-          Simulate payment failure (testing)
-        </label>
+        <p style={{ color: "#b9c5e2" }}>
+          UPI, Card and Net Banking options are available
+          inside Razorpay Checkout, subject to Test Mode
+          availability.
+        </p>
 
         {error && (
           <p role="alert" style={{ color: "#ff7070" }}>
             {error}
+          </p>
+        )}
+
+        {verifying && (
+          <p style={{ color: "#8dd8ff" }}>
+            Verifying payment and confirming tickets...
           </p>
         )}
 
@@ -161,13 +260,27 @@ export default function Payment() {
             border: "none",
             borderRadius: 8,
             color: "white",
+            fontWeight: "bold",
             cursor: processing ? "not-allowed" : "pointer",
           }}
         >
-          {processing
+          {verifying
+            ? "Confirming Tickets..."
+            : processing
             ? "Processing..."
-            : `Demo Pay ₹${total.toLocaleString("en-IN")}`}
+            : `Pay ₹${total.toLocaleString("en-IN")} with Razorpay`}
         </button>
+
+        <p
+          style={{
+            fontSize: 12,
+            color: "#b9c5e2",
+            marginTop: 16,
+          }}
+        >
+          Test Mode only. Tickets are confirmed after
+          successful backend payment verification.
+        </p>
       </section>
     </main>
   );
